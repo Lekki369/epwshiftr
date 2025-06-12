@@ -630,6 +630,7 @@ init_cmip6_index <- function(activity = "ScenarioMIP",
             , `:=`(expect_start = NULL, expect_end = NULL)
         ]
     }
+}
 # }}}
 
 # load_cmip6_index {{{
