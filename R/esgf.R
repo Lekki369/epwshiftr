@@ -353,10 +353,33 @@ esgf_query <- function(activity = "ScenarioMIP",
 # extract_query_dataset {{{
 #' @importFrom data.table rbindlist
 extract_query_dataset <- function(q) {
-    dt <- data.table::rbindlist(lapply(q$response$docs, lapply, unlist))
-    data.table::set(dt, NULL, setdiff(names(dt), RES_DATASET), NULL)
+    # Process each document from the JSON response individually
+    processed_docs <- lapply(q$response$docs, function(doc) {
+        lapply(doc, function(field) {
+            # If a field is a list or a vector with more than one element,
+            # collapse it into a single, comma-separated string.
+            if (is.list(field) || length(field) > 1) {
+                paste(unlist(field), collapse = ", ")
+            } else {
+                field
+            }
+        })
+    })
+
+    # `rbindlist` can now safely bind the processed list of documents
+    dt <- data.table::rbindlist(processed_docs, use.names = TRUE, fill = TRUE)
+
+    # Ensure all required columns from RES_DATASET exist, adding NA if not
+    missing_cols <- setdiff(RES_DATASET, names(dt))
+    if(length(missing_cols) > 0) {
+        for(col in missing_cols) {
+            dt[, (col) := NA_character_]
+        }
+    }
+
     data.table::setcolorder(dt, RES_DATASET)
     data.table::setnames(dt, c("id", "pid"), c("dataset_id", "dataset_pid"))
+    dt
 }
 # }}}
 
@@ -365,25 +388,49 @@ extract_query_dataset <- function(q) {
 extract_query_file <- function(q) {
     # to avoid No visible binding for global variable check NOTE
     id <- NULL
-    dt <- data.table::rbindlist(lapply(q$response$docs, function(l) {
-        l$url <- grep("HTTPServer", unlist(l$url), fixed = TRUE, value = TRUE)
-        # nocov start
-        if (!length(l$url)) {
-            warning("Dataset with id '", l$id, "' does not have a HTTPServer download method.")
-            l$url <- NA_character_
+    
+    # Process each file document from the JSON response individually
+    processed_docs <- lapply(q$response$docs, function(doc) {
+        # Safely extract the HTTPServer URL
+        https_url <- grep("HTTPServer", unlist(doc$url), fixed = TRUE, value = TRUE)
+        if (!length(https_url)) {
+            warning("File with id '", doc$id, "' does not have a HTTPServer download method.")
+            doc$url <- NA_character_
+        } else {
+            # Use the first URL if multiple are found and remove the type suffix
+            doc$url <- gsub("\\|.+$", "", https_url[1])
         }
-        # nocov end
-        lapply(l, unlist)
-    }))
-    data.table::set(dt, NULL, setdiff(names(dt), RES_FILE), NULL)
+
+        # Process all other fields, collapsing any multi-value fields
+        lapply(doc, function(field) {
+            if (is.list(field) || length(field) > 1) {
+                paste(unlist(field), collapse = ", ")
+            } else {
+                field
+            }
+        })
+    })
+
+    # Use rbindlist with fill = TRUE to handle missing columns between records
+    dt <- data.table::rbindlist(processed_docs, use.names = TRUE, fill = TRUE)
+
+    # Ensure all required columns from RES_FILE exist, adding NA if not
+    missing_cols <- setdiff(RES_FILE, names(dt))
+    if(length(missing_cols) > 0) {
+        for(col in missing_cols) {
+            dt[, (col) := NA_character_]
+        }
+    }
+    
     data.table::setcolorder(dt, RES_FILE)
 
     dt[, c("datetime_start", "datetime_end") := parse_file_date(id, frequency)]
-    dt[, url := gsub("\\|.+$", "", url)]
+    
     data.table::setnames(
         dt, c("id", "size", "url"),
         c("file_id", "file_size", "file_url")
     )
+    
     data.table::setcolorder(dt, c(
         "file_id", "dataset_id", "mip_era", "activity_drs", "institution_id",
         "source_id", "experiment_id", "member_id", "table_id", "frequency",
@@ -574,25 +621,15 @@ init_cmip6_index <- function(activity = "ScenarioMIP",
             expect_end = ISOdatetime(years + 1L, 12, 31, 0, 0, 0, "UTC")
         )
 
+        # FIX: Explicitly convert columns to POSIXct to prevent type mismatch
+        dt[, datetime_start := as.POSIXct(datetime_start, tz = "UTC")]
+        dt[, datetime_end := as.POSIXct(datetime_end, tz = "UTC")]
+
         dt[, `:=`(expect_start = datetime_start, expect_end = datetime_end)]
         dt <- dt[exp, on = c("expect_start<=expect_end", "expect_end>=expect_start")][
             , `:=`(expect_start = NULL, expect_end = NULL)
         ]
     }
-
-    # remove duplications
-    dt <- unique(dt, by = "file_id")
-
-    if (save) {
-        # save database into the app data directory
-        data.table::fwrite(dt, file.path(.data_dir(TRUE), "cmip6_index.csv"))
-        verbose("Data file index saved to '", normalizePath(file.path(.data_dir(TRUE), "cmip6_index.csv")), "'")
-
-        this$index_db <- data.table::copy(dt)
-    }
-
-    dt
-}
 # }}}
 
 # load_cmip6_index {{{
