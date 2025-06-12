@@ -353,47 +353,72 @@ esgf_query <- function(activity = "ScenarioMIP",
 # extract_query_dataset {{{
 #' @importFrom data.table rbindlist
 extract_query_dataset <- function(q) {
-    dt <- data.table::rbindlist(lapply(q$response$docs, lapply, unlist))
-    data.table::set(dt, NULL, setdiff(names(dt), RES_DATASET), NULL)
-    data.table::setcolorder(dt, RES_DATASET)
-    data.table::setnames(dt, c("id", "pid"), c("dataset_id", "dataset_pid"))
+  if (is.null(q$response$docs)) {
+    warning("Query contains no dataset documents.")
+    return(data.table::data.table())
+  }
+
+  dt <- normalize_docs(q$response$docs)
+
+  data.table::set(dt, NULL, setdiff(names(dt), RES_DATASET), NULL)
+  data.table::setcolorder(dt, RES_DATASET)
+  data.table::setnames(dt, c("id", "pid"), c("dataset_id", "dataset_pid"))
+
+  return(dt[])
 }
 # }}}
 
 # extract_query_file {{{
 #' @importFrom data.table rbindlist setcolorder setnames tstrsplit ":="
 extract_query_file <- function(q) {
-    # to avoid No visible binding for global variable check NOTE
-    id <- NULL
-    dt <- data.table::rbindlist(lapply(q$response$docs, function(l) {
-        l$url <- grep("HTTPServer", unlist(l$url), fixed = TRUE, value = TRUE)
-        # nocov start
-        if (!length(l$url)) {
-            warning("Dataset with id '", l$id, "' does not have a HTTPServer download method.")
-            l$url <- NA_character_
-        }
-        # nocov end
-        lapply(l, unlist)
-    }))
-    data.table::set(dt, NULL, setdiff(names(dt), RES_FILE), NULL)
-    data.table::setcolorder(dt, RES_FILE)
+  if (is.null(q$response$docs)) {
+    warning("Query contains no file documents.")
+    return(data.table::data.table())
+  }
 
-    dt[, c("datetime_start", "datetime_end") := parse_file_date(id, frequency)]
-    dt[, url := gsub("\\|.+$", "", url)]
-    data.table::setnames(
-        dt, c("id", "size", "url"),
-        c("file_id", "file_size", "file_url")
-    )
-    data.table::setcolorder(dt, c(
-        "file_id", "dataset_id", "mip_era", "activity_drs", "institution_id",
-        "source_id", "experiment_id", "member_id", "table_id", "frequency",
-        "grid_label", "version", "nominal_resolution", "variable_id",
-        "variable_long_name", "variable_units", "datetime_start",
-        "datetime_end", "file_size", "data_node", "file_url", "tracking_id"
-    ))
+  dt <- normalize_docs(lapply(q$response$docs, function(doc) {
+    urls <- unlist(doc$url)
+    http_urls <- grep("HTTPServer", urls, fixed = TRUE, value = TRUE)
 
-    dt
+    if (length(http_urls) == 0) {
+      warning("Dataset with id '", doc$id, "' does not have a HTTPServer download method.")
+      doc$url <- NA_character_
+    } else {
+      doc$url <- http_urls
+    }
+
+    return(doc)
+  }))
+
+  # Keep only expected columns
+  data.table::set(dt, NULL, setdiff(names(dt), RES_FILE), NULL)
+  data.table::setcolorder(dt, RES_FILE)
+
+  # Date parsing
+  dt[, c("datetime_start", "datetime_end") := parse_file_date(id, frequency)]
+
+  # Clean file URLs
+  dt[, url := gsub("\\|.+$", "", url)]
+
+  # Rename for clarity
+  data.table::setnames(
+    dt, c("id", "size", "url"),
+    c("file_id", "file_size", "file_url")
+  )
+
+  # Final column order (as expected)
+  final_cols <- c(
+    "file_id", "dataset_id", "mip_era", "activity_drs", "institution_id",
+    "source_id", "experiment_id", "member_id", "table_id", "frequency",
+    "grid_label", "version", "nominal_resolution", "variable_id",
+    "variable_long_name", "variable_units", "datetime_start",
+    "datetime_end", "file_size", "data_node", "file_url", "tracking_id"
+  )
+  data.table::setcolorder(dt, final_cols)
+
+  return(dt[])
 }
+
 # }}}
 
 # init_cmip6_index {{{
