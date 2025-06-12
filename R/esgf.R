@@ -232,14 +232,14 @@ esgf_query <- function(activity = "ScenarioMIP",
                        limit = 10000L,
                        data_node = NULL) {
     assert_subset(activity, empty.ok = FALSE, choices = c(
-        "AerChemMIP", "C4MIP", "CDRMIP", "CFMIP", "CMIP", "CORDEX", "DAMIP",
+       "AerChemMIP", "C4MIP", "CDRMIP", "CFMIP", "CMIP", "CORDEX", "DAMIP",
         "DCPP", "DynVarMIP", "FAFMIP", "GMMIP", "GeoMIP", "HighResMIP",
-        "ISMIP6", "LS3MIP", "LUMIP", "OMIP", "PAMIP", "PMIP", "RFMIP", "SIMIP",
+        "ISMIP6", "LS3MIP", "LUMIP", "OMIP", "PAMIP", "PMIP", "RFMIP", #"SIMIP",
         "ScenarioMIP", "VIACSAB", "VolMIP"
     ))
     assert_character(variable, any.missing = FALSE, null.ok = TRUE)
     assert_subset(frequency, empty.ok = TRUE, choices = c(
-        "1hr", "1hrCM", "1hrPt", "3hr", "3hrPt", "6hr", "6hrPt", "day", "dec",
+       "1hr", "1hrCM", "1hrPt", "3hr", "3hrPt", "6hr", "6hrPt", "day", "dec",
         "fx", "mon", "monC", "monPt", "subhrPt", "yr", "yrPt"
     ))
     assert_character(experiment, any.missing = FALSE, null.ok = TRUE)
@@ -388,7 +388,7 @@ extract_query_dataset <- function(q) {
 extract_query_file <- function(q) {
     # to avoid No visible binding for global variable check NOTE
     id <- NULL
-    
+
     # Process each file document from the JSON response individually
     processed_docs <- lapply(q$response$docs, function(doc) {
         # Safely extract the HTTPServer URL
@@ -421,16 +421,16 @@ extract_query_file <- function(q) {
             dt[, (col) := NA_character_]
         }
     }
-    
+
     data.table::setcolorder(dt, RES_FILE)
 
     dt[, c("datetime_start", "datetime_end") := parse_file_date(id, frequency)]
-    
+
     data.table::setnames(
         dt, c("id", "size", "url"),
         c("file_id", "file_size", "file_url")
     )
-    
+
     data.table::setcolorder(dt, c(
         "file_id", "dataset_id", "mip_era", "activity_drs", "institution_id",
         "source_id", "experiment_id", "member_id", "table_id", "frequency",
@@ -630,6 +630,19 @@ init_cmip6_index <- function(activity = "ScenarioMIP",
             , `:=`(expect_start = NULL, expect_end = NULL)
         ]
     }
+
+    # remove duplications
+    dt <- unique(dt, by = "file_id")
+
+    if (save) {
+        # save database into the app data directory
+        data.table::fwrite(dt, file.path(.data_dir(TRUE), "cmip6_index.csv"))
+        verbose("Data file index saved to '", normalizePath(file.path(.data_dir(TRUE), "cmip6_index.csv")), "'")
+
+        this$index_db <- data.table::copy(dt)
+    }
+
+    dt
 }
 # }}}
 
@@ -743,8 +756,8 @@ set_cmip6_index <- function(index, save = FALSE) {
     checkmate::assert_subset(
         names(index),
         c(
-            "file_id", "dataset_id", "mip_era", "activity_drs", "institution_id",
-            "source_id", "experiment_id", "member_id", "table_id", "frequency",
+           "file_id", "dataset_id", "mip_era", "activity_drs", #"institution_id",
+            "source_id", "experiment_id", "member_id", "table_id", #"frequency",
             "grid_label", "version", "nominal_resolution", "variable_id",
             "variable_long_name", "variable_units", "datetime_start",
             "datetime_end", "file_size", "data_node", "file_url", "dataset_pid",
